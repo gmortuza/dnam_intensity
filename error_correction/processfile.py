@@ -1,8 +1,12 @@
+import sys
 import time
 from collections import Counter
 import multiprocessing
 from functools import partial
 import math
+
+import pandas as pd
+
 from log import get_logger
 from origami_greedy import Origami
 from origamiprepostprocess import OrigamiPrePostProcess
@@ -63,22 +67,30 @@ class ProcessFile(Origami):
         print("Encoded done")
         return segments, len(xored_data_list), data_bit_per_origami, required_red
 
-    def single_origami_decode(self, single_origami, lock, ior_file_name, correct_dictionary, common_parity_index,
+    def single_origami_decode(self, origami_row, ior_file_name, correct_dictionary, common_parity_index,
                               minimum_temporary_weight, maximum_number_of_error, false_positive):
+        origami_id = origami_row[0]
+        origami_row = origami_row[1]
+        origami = origami_row['Binary String']
+        origami_intensity = origami_row['intensity string']
+        intensity_threshold = origami_row['threshold']
+        fit_quality = origami_row['Fit Quality']
+        ior_text = None
+        # print(origami_id)
         current_time = time.time()
-        self.logger.info("Working on origami(%d): %s", single_origami[0], single_origami[1])
-        if len(single_origami[1]) != 48:
+        self.logger.info("Working on origami(%d): %s", origami_id, origami)
+        if len(origami) != 48:
             self.logger.warning("Data point is missing in the origami")
-            return
+            return [None, None, None]
         try:
-            decoded_matrix = super().decode(single_origami[1], common_parity_index, minimum_temporary_weight,
-                                            maximum_number_of_error, false_positive)
+            decoded_matrix = super().decode(origami, origami_intensity, intensity_threshold, common_parity_index,
+                                            minimum_temporary_weight, maximum_number_of_error, false_positive)
         except Exception as e:
             self.logger.exception(e)
-            return
+            return [None, None, None]
 
         if decoded_matrix == -1:
-            return
+            return [None, None, None]
 
         self.logger.info("Recovered a origami with index: %s and data: %s", decoded_matrix['index'],
                          decoded_matrix['binary_data'])
@@ -101,22 +113,12 @@ class ProcessFile(Origami):
             else:
                 status = " "
             decoded_time = round(time.time() - current_time, 3)
-            lock.acquire()
-            with open(ior_file_name, "a") as ior_file:
-                ior_file.write("{current_origami_index},{origami},{status},{error},{error_location},{orientation},"
-                               "{decoded_index},{decoded_origami},{decoded_data},{decoding_time}\n".format(
-                                origami=single_origami[1],
-                                status=status,
-                                error=decoded_matrix['total_probable_error'],
-                                error_location=str(decoded_matrix['probable_error_locations']).replace(',', ' '),
-                                orientation=decoded_matrix['orientation'],
-                                decoded_index=decoded_matrix['index'],
-                                decoded_origami=self.matrix_to_data_stream(decoded_matrix['matrix']),
-                                decoded_data=decoded_matrix['binary_data'],
-                                decoding_time=decoded_time,
-                                current_origami_index=single_origami[0]))
-            lock.release()
-        return [decoded_matrix, status]
+            ior_text = f"{origami_id},{origami},{status},{decoded_matrix['total_probable_error']}," \
+                       f"{str(decoded_matrix['probable_error_locations']).replace(',', ' ')}," \
+                       f"{decoded_matrix['orientation']},{decoded_matrix['index']}," \
+                       f"{self.matrix_to_data_stream(decoded_matrix['matrix'])},{decoded_matrix['binary_data']}," \
+                       f"{decoded_time},{fit_quality}\n"
+        return [decoded_matrix, status, ior_text]
 
     def decode(self, file_in, file_out, file_size, threshold_data, threshold_parity, maximum_number_of_error,
                individual_origami_info, false_positive, correct_file=False):
@@ -125,16 +127,17 @@ class ProcessFile(Origami):
         total_error_fixed = 0
         # Read the file
         try:
-            data_file = open(file_in, "r")
-            data = data_file.readlines()
-            data_file.close()
+            data_df = pd.read_csv(file_in)
+            # data_file = open(file_in, "r")
+            # data = data_file.readlines()
+            # data_file.close()
             # File to store individual origami information
             if individual_origami_info:
                 ior_file_name = file_out + "_ior.csv"
                 with open(ior_file_name, "w") as ior_file:
                     ior_file.write(
                         "Line number in file, origami,status,error,error location,orientation,decoded index,"
-                        "decoded origami, decoded data,decoding time\n")
+                        "decoded origami, decoded data,decoding time,fit quality\n")
             else:
                 ior_file_name = False
         except Exception as e:
@@ -158,31 +161,36 @@ class ProcessFile(Origami):
                     correct_dictionary[ci] = cd
         # Decoded dictionary with number of occurrence of a single origami
         decoded_dictionary_wno = {}
-        origami_data = [(i, single_origami.rstrip("\n")) for i, single_origami in enumerate(data)]
-        lock = multiprocessing.Manager().Lock()
-        p_single_origami_decode = partial(self.single_origami_decode, lock=lock, ior_file_name=ior_file_name,
-                                          correct_dictionary=
-                                          correct_dictionary, common_parity_index=threshold_data,
+        # origami_data = [(i, single_origami.rstrip("\n")) for i, single_origami in enumerate(data)]
+        p_single_origami_decode = partial(self.single_origami_decode, ior_file_name=ior_file_name,
+                                          correct_dictionary=correct_dictionary,
+                                          common_parity_index=threshold_data,
                                           minimum_temporary_weight=threshold_parity,
                                           maximum_number_of_error=maximum_number_of_error,
                                           false_positive=false_positive)
         optimum_number_of_process = int(math.ceil(multiprocessing.cpu_count()))
         pool = multiprocessing.Pool(processes=optimum_number_of_process)
-        return_value = pool.map(p_single_origami_decode, origami_data)
+        return_value = pool.map(p_single_origami_decode, data_df.iterrows())
+        # return_value = map(p_single_origami_decode, data_df.iterrows())
         pool.close()
         pool.join()
-        for decoded_matrix in return_value:
-            if not decoded_matrix is None and not decoded_matrix[0] is None:
+        if ior_file_name:
+            ior_file = open(ior_file_name, "a")
+        for decoded_matrix, status, ior_text in return_value:
+            if ior_text is not None:
+                ior_file.write(ior_text)
+            if not decoded_matrix is None:
                 # Checking status
                 if correct_file:
-                    if decoded_matrix[1]:
+                    if status:
                         correct_origami += 1
                     else:
                         incorrect_origami += 1
-                total_error_fixed += int(decoded_matrix[0]['total_probable_error'])
-                decoded_dictionary_wno.setdefault(decoded_matrix[0]['index'], []).append(
-                    decoded_matrix[0]['binary_data'])
-
+                total_error_fixed += int(decoded_matrix['total_probable_error'])
+                decoded_dictionary_wno.setdefault(decoded_matrix['index'], []).append(
+                    decoded_matrix['binary_data'])
+        if ior_file_name:
+            ior_file.close()
         majority_vote_queue = {}
         recovered_origami = set()
         origami_list = set(list(range(total_origami_with_red)))

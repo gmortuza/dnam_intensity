@@ -5,6 +5,8 @@ import numpy as np
 import logging
 from log import get_logger
 
+INTENSITY_WEIGHT = 1
+
 
 class Origami:
     """
@@ -340,7 +342,7 @@ class Origami:
         correct_indexes, incorrect_indexes = self._find_possible_error_location(matrix)
         return len(incorrect_indexes) == 0
 
-    def _decode(self, matrix, threshold_parity, threshold_data,
+    def _decode(self, matrix, intensity_error_prob, threshold_parity, threshold_data,
                 maximum_number_of_error, false_positive):
         """
         :param matrix: Matrix that will be decoded
@@ -355,7 +357,7 @@ class Origami:
         # Will check the matrix weight first.
         # If matrix weight is zero that means all the parity matched
         # We will reduce this matrix weight by a greedy approach
-        _, matrix_weight, probable_error = self._get_matrix_weight(matrix, [], threshold_parity,
+        _, matrix_weight, probable_error = self._get_matrix_weight(matrix, [], intensity_error_prob, threshold_parity,
                                                                    threshold_data, false_positive)
         if matrix_weight == 0:
             # All parity matched now we will check orientation and checksum
@@ -369,8 +371,8 @@ class Origami:
         for single_error in probable_error:
             matrix_details[tuple(single_error)] = {}
             changed_matrix, matrix_details[tuple(single_error)]["error_value"], \
-                matrix_details[tuple(single_error)]["probable_error"] = \
-                self._get_matrix_weight(matrix, [single_error], threshold_parity, threshold_data,
+            matrix_details[tuple(single_error)]["probable_error"] = \
+                self._get_matrix_weight(matrix, [single_error], intensity_error_prob, threshold_parity, threshold_data,
                                         false_positive)
             # If after altering one bit only matrix_weight becomes zero then we will check checksum and parity
             if matrix_details[tuple(single_error)]["error_value"] == 0:
@@ -380,6 +382,8 @@ class Origami:
                     return single_recovered_matrix
         # We will sort the matrix based on the matrix weight
         matrix_details = {k: v for k, v in sorted(matrix_details.items(), key=lambda item: item[1]["error_value"])}
+        # for k, v in matrix_details.items():
+        #     print(f"{k} --> {v['error_value']}")
 
         for single_error in matrix_details:
             error_combination_checked_so_far = [single_error]
@@ -398,6 +402,7 @@ class Origami:
                     changed_matrix, single_probable_matrix_weight, single_probable_error = self._get_matrix_weight(
                         matrix,
                         will_check_now,  # Alter this one
+                        intensity_error_prob,
                         threshold_parity,
                         threshold_data,
                         false_positive)
@@ -497,7 +502,7 @@ class Origami:
 
         return index_decimal, text_bin_data
 
-    def _get_matrix_weight(self, matrix, changing_location, threshold_parity, threshold_data,
+    def _get_matrix_weight(self, matrix, changing_location, intensity_error_prob, threshold_parity, threshold_data,
                            false_positive):
         """
         Matrix weight indicates how much error does this individual matrix contains.
@@ -516,7 +521,7 @@ class Origami:
         matrix_copy = copy.deepcopy(matrix)
         total_false_positive_added = 0  # False positive added from data only
         false_positive_added_in_parity = 0  # False positive added from parity only
-        # Will filp the bit
+        # Will flip the bit
         for single_changing_location in changing_location:
             if matrix_copy[single_changing_location[0]][single_changing_location[1]] == 0:
                 matrix_copy[single_changing_location[0]][single_changing_location[1]] = 1
@@ -611,14 +616,21 @@ class Origami:
                     elif max_false_positive_in_data > total_false_positive_added:
                         probable_error.append(i)
                         total_false_positive_added += 1
+
             matrix_weight += key * len(probable_data_error[key])
         probable_error_data_parity = probable_error + probable_parity_error
 
-        return matrix_copy, matrix_weight / len(parity_bit_indexes_correct), probable_error_data_parity
+        # matrix_weight_intensity = intensity_error_prob[tuple(np.array(list(zip(*changing_location))))].sum()
+        matrix_weight_intensity = 1
 
-    def decode(self, data_stream, threshold_data, threshold_parity,
+        matrix_weight = matrix_weight / (len(parity_bit_indexes_correct) * matrix_weight_intensity)
+
+        return matrix_copy, matrix_weight, probable_error_data_parity
+
+    def decode(self, data_stream, origami_intensity, threshold_intensity, threshold_data, threshold_parity,
                maximum_number_of_error, false_positive):
         """
+        origami, origami_intensity, threshold_intensity
         Decode the given data stream into word and their respective index
 
         Parameters:
@@ -636,10 +648,17 @@ class Origami:
         # If length of decoded data is not 48 then show error
         if len(data_stream) != 48:
             raise ValueError("The data stream length should be 48")
+        data_matrix_for_decoding = self.data_stream_to_matrix(data_stream)
+
+        origami_intensity = np.asarray([float(i) for i in origami_intensity.split(" ")]).reshape(6, 8)
         # Initial check which parity bit index gave error and which gave correct results
         # Converting the data stream to data array first
-        data_matrix_for_decoding = self.data_stream_to_matrix(data_stream)
-        return self._decode(data_matrix_for_decoding, threshold_data,
+        intensity_error_prob_fn = lambda x: 1 / (abs(x - threshold_intensity) + 1e-6)
+        intensity_error_prob = intensity_error_prob_fn(origami_intensity)
+        intensity_error_prob *= INTENSITY_WEIGHT
+        # intensity_error_prob = np.ones_like(intesnity_error_prob)
+
+        return self._decode(data_matrix_for_decoding, intensity_error_prob, threshold_data,
                             threshold_parity, maximum_number_of_error, false_positive)
 
         #   After fixing orientation we need to check the checksum bit.
@@ -662,15 +681,20 @@ if __name__ == "__main__":
     bin_stream = "0011011001010101"
     origami_object = Origami(2)
     encoded_file = origami_object.data_stream_to_matrix(origami_object.encode(bin_stream, 0, 16))
+    #
+    # encoded_file[1][0] = 0
+    # encoded_file[3][2] = 0
+    # encoded_file[0][6] = 0
+    #
+    # decoded_file = origami_object.decode(origami_object.matrix_to_data_stream(encoded_file), 2, 2, 9, 10)
+    origami_intensity = "2.031671350335828 121.8294135204803 105.26454325978608 39.823086898063366 43.87093575518295 113.0293943225154 192.69163567690276 0.32584337833325017 177.05348590129103 69.15464334027467 20.00902389563304 161.59504675494205 15.115660355099532 166.76606778995762 32.829957311951965 142.1485858709392 0.0 19.60675760163895 22.568150942634407 11.308706831721247 16.985693348841785 60.872210030061595 44.94015524467607 4.411332542064913 154.53824985207962 135.68825482767923 7.880856007321615 20.057803665231337 38.08545097207789 91.54582499451533 87.50242838752318 0.0 0.0 0.0 205.72721783679478 95.82861039742099 113.40914264953385 150.8484936395564 25.329765814944782 0.021917133685834273 0.0 76.03103242317346 70.27724042185156 35.31719869268008 48.12777482199811 25.55073553860406 0.0 0.0"
 
-    encoded_file[1][0] = 0
-    encoded_file[3][2] = 0
-    encoded_file[0][6] = 0
+    origami = "011011101101010100000110110001100011110001101000"
+    threshold_intensity = 43.421313519446926
+    decoded_origami = origami_object.decode(origami, origami_intensity, threshold_intensity, 2, 2, 9, 0)
 
-    decoded_file = origami_object.decode(origami_object.matrix_to_data_stream(encoded_file), 2, 2, 9, 10)
-
-    print(decoded_file)
-    if not decoded_file == -1 and decoded_file['binary_data'] == bin_stream:
-        print("Decoded successfully")
-    else:
-        print("wasn't decoded successfully")
+    print(decoded_origami)
+    # if not decoded_origami == -1 and decoded_origami['binary_data'] == bin_stream:
+    #     print("Decoded successfully")
+    # else:
+    #     print("wasn't decoded successfully")

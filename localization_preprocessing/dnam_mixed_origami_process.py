@@ -474,7 +474,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="dNAM origami process script")
     parser.add_argument("-f", "--file", help="File name", default="")
     parser.add_argument("-v", "--verbose", help="Print details of execution on console", action="store_true")
-    parser.add_argument("-N", "--number-clusters", help="Number of clusters to analyze", type=int,default=0)
+    parser.add_argument("-N", "--number-clusters", help="Number of clusters to analyze", type=int,default=2000)
     parser.add_argument("-s", "--skip-clusters", help="Number of clusters to skip", type=int,default=0)
     parser.add_argument("-d", "--drift-correct-size", help="Final size of drift correct slice (0 is no drift correction))", type=int,default=0)
     parser.add_argument("-ps", "--pixel-size", help="Pixel size. Needed if reading Thunderstorm csv",type=float,default=0)
@@ -575,7 +575,8 @@ if __name__ == '__main__':
     
     if filePath == '':
         #filePath = r"20190913_george_test2_conv_locs_render_render_filter.hdf5"
-        filePath = r"20190913_All-Matrices_syn2_pure_Triangles_300msExp_Mid-9nt-3nM_MgCl2_18mM_PCA_12mM_PCD_TROLOX_1mM_10_38_52_substack_fixed_locs_render_DRIFT_3_filter.hdf5"
+        # filePath = r"20190913_All-Matrices_syn2_pure_Triangles_300msExp_Mid-9nt-3nM_MgCl2_18mM_PCA_12mM_PCD_TROLOX_1mM_10_38_52_substack_fixed_locs_render_DRIFT_3_filter.hdf5"
+        filePath = "/Users/golammortuza/Desktop/dNAM_DNAPAINT_DriftCorrected_localizations/2000/20190913_Recording1_locs.hdf5"
     #filePath = r"20191002_Matrix_7_Triangles_fixed_locs_DRIFT_3.hdf5"
     #filePath = r"20190909_Matrix14_syn2_pure_Triangles_300msExp_Mid-9nt-3nM_MgCl2_18mM_PCA_12mM_PCD_TROLOX_1mM_11_39_47_fixed_locs_render_DRIFT_3.hdf5"
     #filePath = r"20190905_Matrix2_syn2_pure_Triangles_300msExp_Mid-9nt-3nM_MgCl2_18mM_PCA_12mM_PCD_TROLOX_1mM_14_16_10_fixed_locs_render_DRIFT_3_filter.hdf5"
@@ -983,13 +984,13 @@ if __name__ == '__main__':
         sys.exit()
         
     #Create empty files
-    with open(baseFilePath+'_match_info_'+str(NN)+'.csv','w') as fup:
+    with open(baseFilePath + '_match_info_' + str(NN) + '.csv', 'w') as fup:
         fup.write("\"Binary String\",\"ID\",\"Match Score\",\"Exact String\",\"False Negatives\",\"False Positives\",\"Row Shifts\",\"Column Shifts\",\"Fit Quality\",\"X Position\",\"Y Position\",\"Group Number\"\n")
-    with open(baseFilePath+'_bin_info_'+str(NN)+'.csv','w') as fup:
-        fup.write("\"Binary String\",\"Row Shifts\",\"Column Shifts\",\"Fit Quality\",\"X Position\",\"Y Position\"\n")
-    open(baseFilePath+'_bin_'+str(NN),'w').close()
+    with open(baseFilePath + '_bin_info_' + str(NN) + '.csv','w') as fup:
+        fup.write("\"Binary String\",\"intensity string\",\"threshold\",\"Row Shifts\",\"Column Shifts\",\"Fit Quality\",\"X Position\",\"Y Position\"\n")
+    open(baseFilePath+'_bin_' + str(NN), 'w').close()
     if display2:
-        open(baseFilePath+'_fig_data.csv',"w").close()
+        open(baseFilePath+'_fig_data.csv', "w").close()
     
     processes = []
     parentConnections = []
@@ -999,13 +1000,13 @@ if __name__ == '__main__':
 
     useMultiProcessing = True
     
-    print(len(localizationClusterList))
+    # print(len(localizationClusterList))
 
     
     if fitting:
         if useMultiProcessing:
     
-            pool = Pool(cpu_count()-1)
+            pool = Pool(int(cpu_count()*.8))
     
             results = []
             for index in range(len(localizationClusterList)):
@@ -1365,11 +1366,13 @@ if __name__ == '__main__':
                         binaryString+='0'
                     else:
                         binaryString+='1'
+
+                intensity_string = " ".join(str(i) for i in rawImage.ravel())
                 
                 with open(baseFilePath+'_bin_'+str(NN),'a') as fup:
                     fup.write(binaryString+'\n')
                 with open(baseFilePath+'_bin_info_'+str(NN)+'.csv','a') as fup:
-                    fup.write("\""+binaryString+"\","+str(rShift)+","+str(cShift)+","+str(fitQuality)+","+str(lc.xLAve)+","+str(lc.yLAve)+"\n")
+                    fup.write("\""+binaryString+"\"," + "\""+intensity_string+"\","+str(threshold)+","+str(rShift)+","+str(cShift)+","+str(fitQuality)+","+str(lc.xLAve)+","+str(lc.yLAve)+"\n")
         
         if verbose:                
             print(maxId,maxSScore)
