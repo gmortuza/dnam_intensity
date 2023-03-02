@@ -576,7 +576,7 @@ if __name__ == '__main__':
     if filePath == '':
         #filePath = r"20190913_george_test2_conv_locs_render_render_filter.hdf5"
         # filePath = r"20190913_All-Matrices_syn2_pure_Triangles_300msExp_Mid-9nt-3nM_MgCl2_18mM_PCA_12mM_PCD_TROLOX_1mM_10_38_52_substack_fixed_locs_render_DRIFT_3_filter.hdf5"
-        filePath = "/Users/golammortuza/Desktop/dNAM_DNAPAINT_DriftCorrected_localizations/2000/20190913_Recording1_locs.hdf5"
+        filePath = "/data/golam/dnam_wetlab_data/extracted_data/20190913_Recording1_locs.hdf5"
     #filePath = r"20191002_Matrix_7_Triangles_fixed_locs_DRIFT_3.hdf5"
     #filePath = r"20190909_Matrix14_syn2_pure_Triangles_300msExp_Mid-9nt-3nM_MgCl2_18mM_PCA_12mM_PCD_TROLOX_1mM_11_39_47_fixed_locs_render_DRIFT_3.hdf5"
     #filePath = r"20190905_Matrix2_syn2_pure_Triangles_300msExp_Mid-9nt-3nM_MgCl2_18mM_PCA_12mM_PCD_TROLOX_1mM_14_16_10_fixed_locs_render_DRIFT_3_filter.hdf5"

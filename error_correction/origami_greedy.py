@@ -5,7 +5,7 @@ import numpy as np
 import logging
 from log import get_logger
 
-INTENSITY_WEIGHT = 1
+INTENSITY_WEIGHT = 100
 
 
 class Origami:
@@ -32,6 +32,7 @@ class Origami:
             '3': 'Origami was flipped in both direction. '
         }
         self.logger = get_logger(verbose, __name__)
+        self.total_matrix_weight_cal = 0
 
     @staticmethod
     def _matrix_details(data_bit_per_origami: int) -> object:
@@ -381,11 +382,12 @@ class Origami:
                 if not single_recovered_matrix == -1:
                     return single_recovered_matrix
         # We will sort the matrix based on the matrix weight
-        matrix_details = {k: v for k, v in sorted(matrix_details.items(), key=lambda item: item[1]["error_value"])}
+        # matrix_details = {k: v for k, v in sorted(matrix_details.items(), key=lambda item: item[1]["error_value"])}
+        sorted_key = [k for k, v in sorted(matrix_details.items(), key=lambda item: item[1]["error_value"])]
         # for k, v in matrix_details.items():
         #     print(f"{k} --> {v['error_value']}")
 
-        for single_error in matrix_details:
+        for single_error in sorted_key:
             error_combination_checked_so_far = [single_error]
             # We will alter all the probable error list which we got during calculating the matrix weight
             errors_that_will_be_checked = matrix_details[single_error]["probable_error"]
@@ -472,6 +474,7 @@ class Origami:
             single_recovered_matrix['probable_error_locations'] = error_locations
             single_recovered_matrix['is_recovered'] = True
             single_recovered_matrix['checksum_checked'] = True
+            single_recovered_matrix['total_steps'] = self.total_matrix_weight_cal
             single_recovered_matrix['index'], single_recovered_matrix[
                 'binary_data'] = \
                 self._extract_text_and_index(correct_matrix)
@@ -521,6 +524,7 @@ class Origami:
         matrix_copy = copy.deepcopy(matrix)
         total_false_positive_added = 0  # False positive added from data only
         false_positive_added_in_parity = 0  # False positive added from parity only
+        self.total_matrix_weight_cal += 1
         # Will flip the bit
         for single_changing_location in changing_location:
             if matrix_copy[single_changing_location[0]][single_changing_location[1]] == 0:
@@ -620,10 +624,12 @@ class Origami:
             matrix_weight += key * len(probable_data_error[key])
         probable_error_data_parity = probable_error + probable_parity_error
 
-        # matrix_weight_intensity = intensity_error_prob[tuple(np.array(list(zip(*changing_location))))].sum()
-        matrix_weight_intensity = 1
-
-        matrix_weight = matrix_weight / (len(parity_bit_indexes_correct) * matrix_weight_intensity)
+        if changing_location:
+            matrix_weight_intensity = intensity_error_prob[tuple(np.array(list(zip(*changing_location))))].sum()
+        else:
+            matrix_weight_intensity = 0
+        parity_bit_weight = len(parity_bit_indexes_correct) / 20
+        matrix_weight = matrix_weight / ((parity_bit_weight + matrix_weight_intensity) + 1e-6)
 
         return matrix_copy, matrix_weight, probable_error_data_parity
 
@@ -650,12 +656,18 @@ class Origami:
             raise ValueError("The data stream length should be 48")
         data_matrix_for_decoding = self.data_stream_to_matrix(data_stream)
 
-        origami_intensity = np.asarray([float(i) for i in origami_intensity.split(" ")]).reshape(6, 8)
-        # Initial check which parity bit index gave error and which gave correct results
-        # Converting the data stream to data array first
-        intensity_error_prob_fn = lambda x: 1 / (abs(x - threshold_intensity) + 1e-6)
-        intensity_error_prob = intensity_error_prob_fn(origami_intensity)
-        intensity_error_prob *= INTENSITY_WEIGHT
+        if INTENSITY_WEIGHT == 0:
+            # every cell will have same error probability
+            # intensity_error_prob = np.full(intensity_error_prob.shape, (1 / (self.row * self.column)))
+            intensity_error_prob = np.zeros_like(data_matrix_for_decoding)
+        else:
+            origami_intensity = np.asarray([float(i) for i in origami_intensity.split(" ")]).reshape(6, 8)
+            # Initial check which parity bit index gave error and which gave correct results
+            # Converting the data stream to data array first
+            intensity_error_prob_fn = lambda x: 1 / (abs(x - threshold_intensity) + 1e-6)
+            intensity_error_prob = intensity_error_prob_fn(origami_intensity)  # make
+            factor = INTENSITY_WEIGHT / intensity_error_prob.sum()
+            intensity_error_prob = np.multiply(intensity_error_prob, factor)
         # intensity_error_prob = np.ones_like(intesnity_error_prob)
 
         return self._decode(data_matrix_for_decoding, intensity_error_prob, threshold_data,
@@ -679,7 +691,7 @@ class Origami:
 # This is only for debugging purpose
 if __name__ == "__main__":
     bin_stream = "0011011001010101"
-    origami_object = Origami(2)
+    origami_object = Origami(0)
     encoded_file = origami_object.data_stream_to_matrix(origami_object.encode(bin_stream, 0, 16))
     #
     # encoded_file[1][0] = 0
@@ -687,10 +699,15 @@ if __name__ == "__main__":
     # encoded_file[0][6] = 0
     #
     # decoded_file = origami_object.decode(origami_object.matrix_to_data_stream(encoded_file), 2, 2, 9, 10)
-    origami_intensity = "2.031671350335828 121.8294135204803 105.26454325978608 39.823086898063366 43.87093575518295 113.0293943225154 192.69163567690276 0.32584337833325017 177.05348590129103 69.15464334027467 20.00902389563304 161.59504675494205 15.115660355099532 166.76606778995762 32.829957311951965 142.1485858709392 0.0 19.60675760163895 22.568150942634407 11.308706831721247 16.985693348841785 60.872210030061595 44.94015524467607 4.411332542064913 154.53824985207962 135.68825482767923 7.880856007321615 20.057803665231337 38.08545097207789 91.54582499451533 87.50242838752318 0.0 0.0 0.0 205.72721783679478 95.82861039742099 113.40914264953385 150.8484936395564 25.329765814944782 0.021917133685834273 0.0 76.03103242317346 70.27724042185156 35.31719869268008 48.12777482199811 25.55073553860406 0.0 0.0"
+    origami_intensity = "0.0 16.840992903043507 115.99166854049612 25.42071607678585 34.94615670213987 294.87490049342523 " \
+                        "75.44024632415079 12.029046014273035 129.91312700279656 42.274299392358834 85.81374302868338 0.0 253.04836492129772 " \
+                        "12.321249577470004 0.0 16.32241392321573 205.39842704571612 13.939788448516733 74.48126921814614 8.797044372562894 14.62579077601773 " \
+                        "0.0 1.472530285961708 0.0 0.3704134009725783 0.04183995004502085 28.699338651319092 217.94982874732526 147.69048373085522 96.02788339200197 " \
+                        "18.45973901831415 118.68791235666636 151.79323378610053 194.71390328039888 9.466962063775297 305.0245602229202 0.0 28.35927635195497 " \
+                        "0.0 0.1275209795215588 6.812929290560298 0.0 0.0 0.0 4.860714324190747 0.0 2.836611025994063 70.12507438002574"
 
-    origami = "011011101101010100000110110001100011110001101000"
-    threshold_intensity = 43.421313519446926
+    origami = "001001101010100010100000000111011101000000000001"
+    threshold_intensity = 53.0380507227907
     decoded_origami = origami_object.decode(origami, origami_intensity, threshold_intensity, 2, 2, 9, 0)
 
     print(decoded_origami)
